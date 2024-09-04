@@ -1,0 +1,74 @@
+#include "sumdiag.h"
+#include <pthread.h>
+#include <stdlib.h>
+#include <stdio.h>
+
+// Structure to pass necessary data to each thread
+typedef struct {
+    int start_diag;
+    int end_diag;
+    matrix_t mat;
+    vector_t vec;
+    pthread_mutex_t *mutex;
+} thread_data_t;
+
+// Function to calculate sums of specified diagonals of a matrix
+void *calculate_diagonal_sums(void *arg) {
+    thread_data_t *data = (thread_data_t *)arg;
+    matrix_t mat = data->mat;
+    vector_t vec = data->vec;
+
+    for (int d = data->start_diag; d < data->end_diag; d++) {
+        int sum = 0;
+        int r, c;
+        if (d < mat.rows) {
+            r = mat.rows - 1 - d;
+            c = 0;
+        } else {
+            r = 0;
+            c = d - mat.rows + 1;
+        }
+        while (r < mat.rows && c < mat.cols) {
+            sum += MGET(mat, r, c);
+            r++;
+            c++;
+        }
+        pthread_mutex_lock(data->mutex);
+        VSET(vec, d, sum);
+        pthread_mutex_unlock(data->mutex);
+    }
+    return NULL;
+}
+
+// Optimized function to calculate diagonal sums using multiple threads
+int sumdiag_OPTM(matrix_t mat, vector_t vec, int thread_count) {
+    if (vec.len != (mat.rows + mat.cols - 1)) {
+        printf("sumdiag_optm: size mismatch\n");
+        return 1;
+    }
+
+    pthread_t *threads = malloc(thread_count * sizeof(pthread_t));
+    thread_data_t *thread_data = malloc(thread_count * sizeof(thread_data_t));
+    pthread_mutex_t mutex;
+    pthread_mutex_init(&mutex, NULL);
+
+    int diags = mat.rows + mat.cols - 1;
+    int diags_per_thread = diags / thread_count;
+    int extra_diags = diags % thread_count;
+
+    for (int i = 0; i < thread_count; i++) {
+        int start_diag = i * diags_per_thread + (i < extra_diags ? i : extra_diags);
+        int end_diag = start_diag + diags_per_thread + (i < extra_diags ? 1 : 0);
+        thread_data[i] = (thread_data_t){start_diag, end_diag, mat, vec, &mutex};
+        pthread_create(&threads[i], NULL, calculate_diagonal_sums, &thread_data[i]);
+    }
+
+    for (int i = 0; i < thread_count; i++) {
+        pthread_join(threads[i], NULL);
+    }
+
+    pthread_mutex_destroy(&mutex);
+    free(threads);
+    free(thread_data);
+    return 0;
+}
